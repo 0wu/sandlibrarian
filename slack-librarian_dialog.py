@@ -7,6 +7,7 @@ from mendeley import Mendeley
 import yaml
 import requests
 
+from threading import Thread
 from slackclient import SlackClient
 
 # Your app's Slack bot user token
@@ -56,6 +57,33 @@ token_dm = slack_client.api_call(
     }]
   }]
 )
+
+
+def process_data(doc_url, doc_name, tags):
+    """This function handles the pdf upload to Mendeley.
+
+    Parameters
+    ----------
+    doc_url: str
+        slack url where the pdf can be found
+    doc_name: str
+        name of the file to be uploaded to Mendeley
+    tags: list
+        list of strings to be added as tags to the pdf
+
+    We use a separate function here for the pdf upload as the slack
+    dialog needs an HTTP 200 response within 3 seconds. This function
+    gets called within a thread started by the interactive slack dialog for
+    uploading and tagging. We first need to download the pdf from slack
+    and then use the mendeley api to create a new document from a
+    request response.
+    """
+    req_down = requests.get(doc_url,
+                            headers={"Authorization": "Bearer %s"
+                                     % os.environ.get('SLACK_BOT_TOKEN')})
+    doc = (mendeley_token['session'].documents
+           .create_pdf_from_requests(req_down.content, doc_name))
+    _ = doc.update(tags=tags)
 
 
 def _event_handler(event_type, slack_event, mendeley_session):
@@ -141,104 +169,109 @@ def _event_handler(event_type, slack_event, mendeley_session):
 
 @app.route("/slack/message_actions", methods=["POST"])
 def message_actions():
+    """This function receives and message actions and processess it.
+
+    This function has to return a HTTP 200 response within 3 seconds.
+    It handles all the processing of users responses to interactive elements.
+    """
     # Parse the request payload
     message_action = json.loads(request.form["payload"])
-    user_id = message_action["user"]["id"]
-    print(message_action)
+    # check the verification token
+    if message_action['token'] == SLACK_VERIFICATION_TOKEN:
+        user_id = message_action["user"]["id"]
 
-    if message_action["type"] == "interactive_message" and message_action['actions'][0]['name'] == 'token':
-        mendeley_token['message_ts'] = message_action["message_ts"]
-        print(len(auth.get_login_url()))
-        open_dialog = slack_client.api_call(
-            "dialog.open",
-            trigger_id=message_action["trigger_id"],
-            dialog={
-                "title": "Get token from here",
-                "submit_label": "Submit",
-                "callback_id": config['user'] + "token",
-                "elements": [
-                    {
-                        "label": "token",
-                        "type": "text",
-                        "name": "inserted_token",
-                        "value": "",
-                    }
-                ]
-            }
-        )
+        # If it is an interactive message swith the token action open a dialog
+        # for the user to enter the token url
+        if (message_action["type"] == "interactive_message" and
+                message_action['actions'][0]['name'] == 'token'):
+            mendeley_token['message_ts'] = message_action["message_ts"]
+            _ = slack_client.api_call(
+                "dialog.open",
+                trigger_id=message_action["trigger_id"],
+                dialog={
+                    "title": "Get token from here",
+                    "submit_label": "Submit",
+                    "callback_id": SLACK_MENDELEY_LOGIN + "token",
+                    "elements": [
+                        {
+                            "label": "token",
+                            "type": "text",
+                            "name": "inserted_token",
+                            "value": "",
+                        }
+                    ]
+                }
+            )
+        # if it is a interactive message without a token assume its a tagging
+        # process.
+        elif (message_action["type"] == "interactive_message" and
+              message_action['actions'][0]['name'] != 'token'):
+            # Open a dialog to the user to let him add tags to the pdf
+            PDF_TAGS[user_id]["message_ts"] = message_action["message_ts"]
 
-        print(open_dialog)
+            slack_client.api_call(
+                "dialog.open",
+                trigger_id=message_action["trigger_id"],
+                dialog={
+                    "title": "Tag the pdf",
+                    "submit_label": "Submit",
+                    "callback_id": user_id + "pdf_tag_form",
+                    "elements": [
+                        {
+                            "label": "add tags",
+                            "type": "textarea",
+                            "name": "tags",
+                            "placeholder": "insert tags as simple comma separated words (e.g. byroniser, agent based model, test)",
+                        }
+                    ]
+                }
+            )
 
+            # Update the user that things are happening
+            slack_client.api_call(
+              "chat.postEphemeral",
+              as_user=True,
+              channel=PDF_TAGS[user_id]["order_channel"],
+              user=user_id,
+              text="Tagging the pdf",
+              attachments=[]
+            )
 
-    elif message_action["type"] == "interactive_message" and message_action['actions'][0]['name'] != 'token':
-        # Add the message_ts to the user's order info
-        PDF_TAGS[user_id]["message_ts"] = message_action["message_ts"]
+        # if it is a submission fo a dialog with a token finish mendelen auth
+        # process. Save the session in the mendeley dict.
+        elif (message_action["type"] == "dialog_submission" and
+              'inserted_token' in message_action['submission'].keys()):
+            mendeley_token['session'] = auth.authenticate(
+                message_action['submission']['inserted_token'])
+            slack_client.api_call(
+                "chat.update",
+                channel=SLACK_MENDELEY_LOGIN,
+                ts=mendeley_token["message_ts"],
+                text=":white_check_mark: PDF tagged!",
+                attachments=[]
+            )
+        # if the submission is not a token then it will be tags so
+        # read in the tags start a thread with uploading and tagging
+        # and return a 200 HTTP response
+        elif (message_action["type"] == "dialog_submission" and
+              'inserted_token' not in message_action['submission'].keys()):
+            tag_order = PDF_TAGS[user_id]
+            doc_url = tag_order["doc_url"]
+            tags = message_action['submission']['tags'].split(",")
+            # Update the user that the pdf was tagged and is being uploaded
+            slack_client.api_call(
+              "chat.postEphemeral",
+              as_user=True,
+              channel=PDF_TAGS[user_id]["order_channel"],
+              user=user_id,
+              text="Tagging complete uploading to mendeley",
+              attachments=[]
+            )
+            t = Thread(target=process_data,
+                       args=(doc_url, tag_order['doc_name'], tags))
+            t.start()
 
-        # Show the ordering dialog to the user
-        open_dialog = slack_client.api_call(
-            "dialog.open",
-            trigger_id=message_action["trigger_id"],
-            dialog={
-                "title": "Tag the pdf",
-                "submit_label": "Submit",
-                "callback_id": user_id + "pdf_tag_form",
-                "elements": [
-                    {
-                        "label": "add tags",
-                        "type": "textarea",
-                        "name": "tags",
-                        "placeholder": "insert tags as simple comma separated words (e.g. byroniser, agent based model, test)",
-                    }
-                ]
-            }
-        )
-
-        print(open_dialog)
-
-        # Update the message to show that we're in the process of taking their order
-        slack_client.api_call(
-            "chat.update",
-            channel=PDF_TAGS[user_id]["order_channel"],
-            ts=message_action["message_ts"],
-            text=":pencil: Adding tags...",
-            attachments=[]
-        )
-
-    elif message_action["type"] == "dialog_submission" and 'inserted_token' in message_action['submission'].keys():
-        token = message_action['submission']['inserted_token']
-        print(token)
-        mendeley_token['session'] = auth.authenticate(token)
-        # mendeley_session = auth.authenticate(token)
-        # Update the message to show that we're in the process of taking their order
-        slack_client.api_call(
-            "chat.update",
-            channel=config['user'],
-            ts=mendeley_token["message_ts"],
-            text=":white_check_mark: PDF tagged!",
-            attachments=[]
-        )
-
-    elif message_action["type"] == "dialog_submission" and 'inserted_token' not in message_action['submission'].keys():
-        tag_order = PDF_TAGS[user_id]
-        doc_url = tag_order["doc_url"]
-
-        tags = message_action['submission']['tags'].split(",")
-        # Update the message to show that we're in the process of taking their order
-        slack_client.api_call(
-            "chat.update",
-            channel=PDF_TAGS[user_id]["order_channel"],
-            ts=tag_order["message_ts"],
-            text=":white_check_mark: PDF uploaded and tagged!",
-            attachments=[]
-        )
-        req_down = requests.get(doc_url,
-                                headers={"Authorization": "Bearer %s" % os.environ.get('SLACK_BOT_TOKEN')})
-        # print(req_down.content)
-        doc = mendeley_token['session'].documents.create_pdf_from_requests(req_down.content, tag_order['doc_name'])
-        updated_doc = doc.update(tags=tags)
-
-
-    return make_response("", 200)
+        return make_response("", 200)
 
 
 @app.route("/listening", methods=["GET", "POST"])
