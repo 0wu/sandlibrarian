@@ -15,3 +15,4 @@ six==1.9.0
 vcrpy==1.2.0
 wrapt==1.10.2
 flask
+git+https://github.com/Florian-Roessler/mendeley-python-sdk.git@document_from_requests
