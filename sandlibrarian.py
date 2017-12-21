@@ -166,6 +166,10 @@ def _event_handler(event_type, slack_event, mendeley_session):
     return make_response(message, 200, {"X-Slack-No-Retry": 1})
 
 
+@app.route("/ping", methods=['get'])
+def ping():
+    return make_response("pong", 200)
+
 @app.route("/slack/message_actions", methods=["POST"])
 def message_actions():
     """This function receives and message actions and processess it.
@@ -308,4 +312,4 @@ def hears():
 
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host='0.0.0.0')
