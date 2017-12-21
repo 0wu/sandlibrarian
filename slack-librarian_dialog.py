@@ -2,56 +2,58 @@ from flask import Flask, request, make_response
 import os
 import json
 import time
-
-from mendeley import Mendeley
-import yaml
 import requests
 
+from mendeley import Mendeley
 from threading import Thread
 from slackclient import SlackClient
 
 # Your app's Slack bot user token
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-# SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
+SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
+MENDELEY_CLIENTID = os.environ["MENDELEY_CLIENTID"]
+MENDELEY_CLIENTSECRET = os.environ["MENDELEY_CLIENTSECRET"]
+SLACK_MENDELEY_LOGIN = os.environ["SLACK_MENDELEY_USER"]
+MENDELY_REDIRECT = os.environ["MENDELEY_REDIRECT"]
 
 # Slack client for Web API requests
 slack_client = SlackClient(SLACK_BOT_TOKEN)
+# This will keep track of which pdfs to tag
 PDF_TAGS = {}
+# this will be used for the mendeley session
 mendeley_token = {}
+# this will keep track of which pdfs have been processed to avoid double posts
 processed_tokens = []
 # Flask webserver for incoming traffic from Slack
 app = Flask(__name__)
-
-with open('config.yml') as f:
-    config = yaml.load(f)
-
-men = Mendeley(config['clientId'], config['clientSecret'],
-               'http://localhost:5000/oauth')
-
+# Start mendeley client and Auth workflow
+men = Mendeley(MENDELEY_CLIENTID, MENDELEY_CLIENTSECRET,
+               MENDELY_REDIRECT)
 auth = men.start_authorization_code_flow()
-# print("please go to:", auth.get_login_url())
+# message user to authorise mendeley api
 response = slack_client.api_call(
   "chat.postMessage",
   as_user=True,
-  channel=config['user'],
-  # ts=form_json["message_ts"],
-  text="%s" % auth.get_login_url(),
+  channel=SLACK_MENDELEY_LOGIN,
+  text="Please go to this URL and login with your Mendeley account. After the successful login you will get to an error page. Copy the url of this error page and past it into the interactive dialog created by this bot in ~20 seconds: %s" % auth.get_login_url(),
   attachments=[]
 )
+# give the user 20 seconds to retrieve the token (3 second timeout on the
+# interactive message)
 time.sleep(20)
 token_dm = slack_client.api_call(
   "chat.postMessage",
   as_user=True,
-  channel=config['user'],
+  channel=SLACK_MENDELEY_LOGIN,
   text="I am Librarian ::robot_face::, please give me a token",
   attachments=[{
     "text": "",
-    "callback_id": config['user'] + "token",
+    "callback_id": SLACK_MENDELEY_LOGIN + "token",
     "color": "#3AA3E3",
     "attachment_type": "default",
     "actions": [{
       "name": "token",
-      "text": "insert a token please",
+      "text": "insert the url please",
       "type": "button",
       "value": "token"
     }]
@@ -105,14 +107,16 @@ def _event_handler(event_type, slack_event, mendeley_session):
 
     """
 
-    # ================ Team Join Events =============== #
-    # When the user first joins a team, the type of event will be team_join
-    # print(event_type)
-    print("----------------", slack_event, "-------------")
+    # ================ file share events =============== #
+    # When the user uploads a pdf, the type of event will be file_shared
     if event_type == 'file_shared':
+        # check if the file id has been processed already
+        # for some reasons sometimes we get two/three events.
         if slack_event['event']['file']['id'] in processed_tokens:
             return make_response("Welcome Message Sent", 200,)
+        # add file id to processed file list
         processed_tokens.append(slack_event['event']['file']['id'])
+        # get the info of the file that was just uploaded
         webhook_url = "https://slack.com/api/files.info"
         slack_data = {'token': os.environ.get('SLACK_BOT_TOKEN'),
                       'file': slack_event["event"]['file_id']}
@@ -121,43 +125,38 @@ def _event_handler(event_type, slack_event, mendeley_session):
                                      'application/x-www-form-urlencoded'})
 
         file_info = json.loads(req.content)
-        print(file_info)
+        # check if the file has been uploaded correctly and if it's type is pdf
         if file_info['ok'] and file_info['file']['filetype'] == 'pdf':
-
-            order_dm = slack_client.api_call(
-              "chat.postMessage",
+            # inform user that he can upload and tag the file he just added
+            # do this as ephemeral message to not spam all users
+            _ = slack_client.api_call(
+              "chat.postEphemeral",
               as_user=True,
-              channel=slack_event["event"]['user_id'],
-              text="I am Librarian ::robot_face::, and I\'m here to help you tag the pdf you just uploaded",
+              channel=file_info['file']["channels"][0],
+              user=file_info['file']["user"],
+              text="I am Librarian ::robot_face::, and I\'m here to help you tag the pdf you just uploaded. This message will be gone next time you open slack",
               attachments=[{
                 "text": "",
-                "callback_id": slack_event["event"]['user_id'] + "pdf_tag_form",
+                "callback_id": (slack_event["event"]['user_id'] +
+                                "pdf_tag_form"),
                 "color": "#3AA3E3",
                 "attachment_type": "default",
                 "actions": [{
                   "name": "pdf_tag",
-                  "text": "Upload PDF to Mendeley and add tags",
+                  "text": "add tags and upload",
                   "type": "button",
                   "value": "pdf_tag"
                 }]
               }]
             )
-
-            # req_down = requests.get(file_info['file']['url_private'],
-            #                         headers={"Authorization": "Bearer %s" % os.environ.get('SLACK_BOT_TOKEN')})
-            # # print(req_down.content)
-            # doc = mendeley_session.documents.create_pdf_from_requests(req_down.content, file_info['file']['name'])
-            # print(doc)
-            # Create a new order for this user in the PDF_TAGS dictionary
+            # add some info to the pdf tag dict so that it can be used
+            # by the endpoint that deals with the responses from slack
             PDF_TAGS[slack_event["event"]['user_id']] = {
-                "order_channel": order_dm["channel"],
+                "order_channel": file_info['file']["channels"][0],
                 "message_ts": "",
-                "order": {},
                 "doc_url": file_info['file']['url_private'],
                 'doc_name': file_info['file']['name']
             }
-            # updated_doc = doc.update(tags=["sandtable, yeah"])
-            # print(updated_doc)
         return make_response("Welcome Message Sent", 200,)
 
     # ============= Event Type Not Found! ============= #
@@ -281,31 +280,31 @@ def hears():
     handler helper function to route events to our Bot.
     """
     slack_event = json.loads(request.data)
-    if 'session' in mendeley_token.keys():
-        mendeley_session = mendeley_token['session']
-    else:
-        mendeley_session = None
+    if slack_event['token'] == SLACK_VERIFICATION_TOKEN:
+        if 'session' in mendeley_token.keys():
+            mendeley_session = mendeley_token['session']
+        else:
+            mendeley_session = None
 
-    # ============= Slack URL Verification ============ #
-    # In order to verify the url of our endpoint, Slack will send a challenge
-    # token in a request and check for this token in the response our endpoint
-    # sends back.
-    #       For more info: https://api.slack.com/events/url_verification
-    if "challenge" in slack_event:
-        return make_response(slack_event["challenge"], 200, {"content_type":
-                                                             "application/json"
-                                                             })
+        # ============= Slack URL Verification ============ #
+        # In order to verify the url of our endpoint, Slack will send a challenge
+        # token in a request and check for this token in the response our endpoint
+        # sends back.
+        #       For more info: https://api.slack.com/events/url_verification
+        if "challenge" in slack_event:
+            return make_response(slack_event["challenge"], 200, {"content_type":
+                                                                 "application/json"
+                                                                 })
 
-    # ====== Process Incoming Events from Slack ======= #
-    # If the incoming request is an Event we've subcribed to
-    if "event" in slack_event:
-        event_type = slack_event["event"]["type"]
-        # Then handle the event by event_type and have your bot respond
-        return _event_handler(event_type, slack_event, mendeley_session)
-    # If our bot hears things that are not events we've subscribed to,
-    # send a quirky but helpful error response
-    return make_response("[NO EVENT IN SLACK REQUEST] These are not the droids\
-                         you're looking for.", 404, {"X-Slack-No-Retry": 1})
+        # ====== Process Incoming Events from Slack ======= #
+        # If the incoming request is an Event we've subcribed to
+        if "event" in slack_event:
+            event_type = slack_event["event"]["type"]
+            # Then handle the event by event_type and have your bot respond
+            return _event_handler(event_type, slack_event, mendeley_session)
+        # If our bot hears things that are not events we've subscribed to,
+        # send a quirky but helpful error response
+        return make_response("[NO EVENT IN SLACK REQUEST] These are not the droids you're looking for.", 404, {"X-Slack-No-Retry": 1})
 
 
 if __name__ == "__main__":
