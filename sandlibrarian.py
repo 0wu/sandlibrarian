@@ -132,7 +132,7 @@ def _event_handler(event_type, slack_event, mendeley_session):
             req_user = requests.get('https://slack.com/api/users.info',
                                     params=slack_data_user)
             t = json.loads(req_user.content)
-            user_name = t['name']
+            user_name = t['user']['name']
             # inform user that he can upload and tag the file he just added
             # do this as ephemeral message to not spam all users
             _ = slack_client.api_call(
