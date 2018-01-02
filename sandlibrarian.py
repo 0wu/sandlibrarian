@@ -131,8 +131,14 @@ def _event_handler(event_type, slack_event, mendeley_session):
                                'user': file_info['file']["user"]}
             req_user = requests.get('https://slack.com/api/users.info',
                                     params=slack_data_user)
+            slack_data_channel = {'token': os.environ.get('SLACK_BOT_TOKEN'),
+                                  'channel': file_info['file']["channels"][0]}
+            req_channel = requests.get('https://slack.com/api/channels.info',
+                                        params=slack_data_channel)
             t = json.loads(req_user.content)
             user_name = t['user']['name']
+            t = json.loads(req_channel.content)
+            channel_name = t["channel"]["name"]
             # inform user that he can upload and tag the file he just added
             # do this as ephemeral message to not spam all users
             _ = slack_client.api_call(
@@ -164,7 +170,7 @@ def _event_handler(event_type, slack_event, mendeley_session):
                 'doc_name': file_info['file']['name'],
                 'default_tags': ["sandtable",
                                  time.strftime('%Y%m%d', time.localtime(file_info['file']["timestamp"])),
-                                 file_info['file']["channels"][0],
+                                 channel_name,
                                  user_name]
             }
         return make_response("Welcome Message Sent", 200,)
@@ -179,6 +185,7 @@ def _event_handler(event_type, slack_event, mendeley_session):
 @app.route("/ping", methods=['get'])
 def ping():
     return make_response("pong", 200)
+
 
 @app.route("/slack/message_actions", methods=["POST"])
 def message_actions():
