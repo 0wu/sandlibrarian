@@ -15,6 +15,5 @@ create a docker-compose
 
 # TODO:
 
-- add default tags: `year` `month` `channel` `user`
 - make token renewal easier
-- change the icon to an owl
+- Confirm that mendeley is up and running
