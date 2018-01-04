@@ -82,7 +82,7 @@ def process_data(doc_url, doc_name, tags):
     """
     req_down = requests.get(doc_url,
                             headers={"Authorization": "Bearer %s"
-                                     % os.environ.get('SLACK_BOT_TOKEN')})
+                                     % SLACK_BOT_TOKEN})
     doc = (mendeley_token['session'].documents
            .create_pdf_from_requests(req_down.content, doc_name))
     _ = doc.update(tags=tags)
@@ -118,7 +118,7 @@ def _event_handler(event_type, slack_event, mendeley_session):
         processed_tokens.append(slack_event['event']['file']['id'])
         # get the info of the file that was just uploaded
         webhook_url = "https://slack.com/api/files.info"
-        slack_data = {'token': os.environ.get('SLACK_BOT_TOKEN'),
+        slack_data = {'token': SLACK_BOT_TOKEN,
                       'file': slack_event["event"]['file_id']}
         req = requests.post(webhook_url, data=slack_data,
                             headers={'Content-Type':
@@ -127,14 +127,14 @@ def _event_handler(event_type, slack_event, mendeley_session):
         file_info = json.loads(req.content)
         # check if the file has been uploaded correctly and if it's type is pdf
         if file_info['ok'] and file_info['file']['filetype'] == 'pdf':
-            slack_data_user = {'token': os.environ.get('SLACK_BOT_TOKEN'),
+            slack_data_user = {'token': SLACK_BOT_TOKEN,
                                'user': file_info['file']["user"]}
             req_user = requests.get('https://slack.com/api/users.info',
                                     params=slack_data_user)
-            slack_data_channel = {'token': os.environ.get('SLACK_BOT_TOKEN'),
+            slack_data_channel = {'token': SLACK_BOT_TOKEN,
                                   'channel': file_info['file']["channels"][0]}
             req_channel = requests.get('https://slack.com/api/channels.info',
-                                        params=slack_data_channel)
+                                       params=slack_data_channel)
             t = json.loads(req_user.content)
             user_name = t['user']['name']
             t = json.loads(req_channel.content)
