@@ -450,21 +450,21 @@ Now that all the coding is done let's finish the last bits of set-up procedure o
 Let's restart the Slackbot script or docker container to and see if we can get the Mendeley API up and running. `python app.py` or `docker-compose up`
 
 <img src="images/sandlibrarian_notification_mendeley.png" align="center">
-<img src="images/sandlibrarian_link_mendeley.png" width="100%" height="100%" align="center">
+<img src="images/sandlibrarian_link_mendeley.png" align="center">
 
 Ok we get the auth link for Slack, lets head over and log-in to retrieve the auth URL. That URL gets inserted in the interactive dialog and that should be it. (Maybe we should send a confirmation message to the user at this point? Something for the TODO)
 
-<img src="images/sandlibrarian_token_box.png" width="300" height="150"  align="center">
+<img src="images/sandlibrarian_token_box.png" align="center">
 
 OK cool all good let's upload a PDF in the test channel and see if we can tag it.
 
-<img src="images/sandlibrarian_prompt_after_upload.png" width="40%" height="40%"  align="center">
+<img src="images/sandlibrarian_prompt_after_upload.png" align="center">
 
-<img src="images/sandlibrarian_tag_box.png" width="40%" height="40%" align="center">
+<img src="images/sandlibrarian_tag_box.png" align="center">
 
 Last check is if it pops up in Mendeley itself, so let's head over there.
 
-<img src="images/mendeley.png" width="40%" height="40%" align="center">
+<img src="images/mendeley.png" align="center">
 
 YES! Great, from now on all PDFs can be tagged and uploaded.
 
