@@ -299,7 +299,7 @@ This finishes off the document handling part of the project.
 
 This sub-section on setting up the app on Mendeley is mostly based on the info from [here](https://github.com/Mendeley/mendeley-api-python-example) but I briefly describe it here for completion. In order to be able to use the Mendeley API an Mendeley app has to be created a secret generated and a redirect link set. This can be done under [Mendeley dev](http://dev.mendeley.com/) under My applications. Register a new app and for development use `http://localhost:5000/oauth` as redirect URL.
 
-<img src="/Users/florian/Desktop/mendeley_app.png" width="500" height="300" align="center">
+<img src="images/mendeley_app.png" width="500" height="300" align="center">
 
 The ID and the secret that were created should go into two environment variables which you will need later. I also added the redirect URL as environment variable because that will later be set to the domain to which you deploy. Something like `https://foo.bar.com/oauth`.
 
@@ -449,8 +449,8 @@ Now that all the coding is done let's finish the last bits of set-up procedure o
 
 Let's restart the Slackbot script or docker container to and see if we can get the Mendeley API up and running. `python app.py` or `docker-compose up`
 
-<img src="images/sandlibrarian_notification_mendeley.png" width="150" height="75" align="center">
-<img src="images/sandlibrarian_link_mendeley.png" width="50%" height="50%" align="center">
+<img src="images/sandlibrarian_notification_mendeley.png" align="center">
+<img src="images/sandlibrarian_link_mendeley.png" width="100%" height="100%" align="center">
 
 Ok we get the auth link for Slack, lets head over and log-in to retrieve the auth URL. That URL gets inserted in the interactive dialog and that should be it. (Maybe we should send a confirmation message to the user at this point? Something for the TODO)
 
